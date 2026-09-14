@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+
+  <title>マミ回避</title>
+
+  <style>
+    body {
+      margin: 0;
+      background: #222;
+      min-height: 100vh;
+
+      display: flex;
+      justify-content: center;
+      align-items: center;
+
+      overflow: hidden;
+      touch-action: none;
+    }
+
+    canvas {
+      background: white;
+      width: min(800px, 100vw);
+      height: auto;
+      display: block;
+    }
+
+    /* 再挑戦ボタン */
+    #retryButton {
+      position: fixed;
+      left: 50%;
+      top: calc(50% + 130px);
+      transform: translateX(-50%);
+
+      padding: 12px 30px;
+      font-size: 24px;
+
+      cursor: pointer;
+      display: none;
+      z-index: 10;
+    }
+
+    /* スマホ操作ボタン */
+    #mobileControls {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+
+      z-index: 20;
+    }
+
+    #directionButtons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .controlButton {
+      width: 70px;
+      height: 60px;
+
+      border: none;
+      border-radius: 12px;
+
+      background: rgba(255, 255, 255, 0.85);
+      color: #222;
+
+      font-size: 28px;
+      font-weight: bold;
+
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.4);
+
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    #dropButton {
+      width: 150px;
+      font-size: 22px;
+    }
+
+    .controlButton:active {
+      background: rgba(200, 200, 200, 0.95);
+      transform: scale(0.95);
+    }
+
+    /* PCでは操作ボタンを表示しない */
+    @media (min-width: 801px) {
+      #mobileControls {
+        display: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+  <button id="retryButton">再挑戦</button>
+
+  <!-- スマホ用操作 -->
+  <div id="mobileControls">
+
+    <div id="directionButtons">
+      <button class="controlButton" id="leftButton">←</button>
+      <button class="controlButton" id="rightButton">→</button>
+    </div>
+
+    <button class="controlButton" id="dropButton">落とす</button>
+
+  </div>
+
+
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+
+
+    // =========================
+    // 画像
+    // =========================
+
+    const perfectImage = new Image();
+    const bodyImage = new Image();
+    const headImage = new Image();
+
+    perfectImage.src = "images/perfect.png";
+    bodyImage.src = "images/body.png";
+    headImage.src = "images/head.png";
+
+
+    // =========================
+    // 基本設定
+    // =========================
+
+    const bodyX = 150;
+    const bodyY = 300;
+
+    const bodyScale = 0.5;
+    const headScale = 0.5;
+
+    const headStartY = -100;
+
+    const headSpeed = 5;
+    const fallSpeed = 8;
+
+    const successTolerance = 10;
+
+    const targetX = bodyX;
+    const targetY = bodyY;
+
+
+    // =========================
+    // ゲーム状態
+    // =========================
+
+    let gameState = "intro";
+
+    let headX = 0;
+    let headY = headStartY;
+
+    let falling = false;
+    let missed = false;
+
+    let resultText = "";
+    let resultDistance = 0;
+
+
+    // =========================
+    // イントロ
+    // =========================
+
+    let introTimer = 0;
+    const introWaitTime = 90;
+
+    let blackBarHeight = 0;
+    let barComingDown = true;
+    let barGoingUp = false;
+
+    const blackBarTargetHeight = 500;
+    const blackBarSpeed = 5;
+    const introUpSpeed = 10;
+
+    let showingPerfect = true;
+
+    let introBodyY = bodyY;
+
+    let introBodyWaitTimer = 0;
+    const introBodyWaitTime = 60;
+
+    let introBodyFalling = false;
+    const introFallSpeed = 5;
+
+
+    // =========================
+    // 再挑戦ボタン
+    // =========================
+
+    const retryButton = document.getElementById("retryButton");
+
+
+    // =========================
+    // 新しい頭
+    // =========================
+
+    function newHead() {
+
+      headX = Math.random() * 650 - 150;
+      headY = headStartY;
+
+      falling = false;
+      missed = false;
+
+      resultText = "";
+      resultDistance = 0;
+    }
+
+
+    // =========================
+    // ゲーム開始
+    // =========================
+
+    function startGame() {
+
+      gameState = "game";
+
+      newHead();
+
+      retryButton.style.display = "none";
+    }
+
+
+    // =========================
+    // 再挑戦
+    // =========================
+
+    retryButton.addEventListener("click", () => {
+
+      newHead();
+
+      gameState = "game";
+
+      retryButton.style.display = "none";
+    });
+
+
+    // =========================
+    // 距離計算
+    // =========================
+
+    function getDistance() {
+
+      const dx = headX - targetX;
+      const dy = headY - targetY;
+
+      return Math.round(
+        Math.sqrt(dx * dx + dy * dy)
+      );
+    }
+
+
+    // =========================
+    // 左右移動
+    // =========================
+
+    let moveLeft = false;
+    let moveRight = false;
+
+
+    // PCキー
+    document.addEventListener("keydown", (event) => {
+
+      if (event.key === "ArrowLeft") {
+        moveLeft = true;
+      }
+
+      if (event.key === "ArrowRight") {
+        moveRight = true;
+      }
+
+      if (event.code === "Space") {
+
+        event.preventDefault();
+
+        if (
+          gameState === "game" &&
+          !falling &&
+          !missed
+        ) {
+          falling = true;
+        }
+      }
+    });
+
+
+    document.addEventListener("keyup", (event) => {
+
+      if (event.key === "ArrowLeft") {
+        moveLeft = false;
+      }
+
+      if (event.key === "ArrowRight") {
+        moveRight = false;
+      }
+    });
+
+
+    // =========================
+    // スマホ左右ボタン
+    // =========================
+
+    const leftButton =
+      document.getElementById("leftButton");
+
+    const rightButton =
+      document.getElementById("rightButton");
+
+
+    function startMovingLeft(event) {
+
+      event.preventDefault();
+
+      moveLeft = true;
+    }
+
+
+    function stopMovingLeft(event) {
+
+      event.preventDefault();
+
+      moveLeft = false;
+    }
+
+
+    function startMovingRight(event) {
+
+      event.preventDefault();
+
+      moveRight = true;
+    }
+
+
+    function stopMovingRight(event) {
+
+      event.preventDefault();
+
+      moveRight = false;
+    }
+
+
+    leftButton.addEventListener(
+      "pointerdown",
+      startMovingLeft
+    );
+
+    leftButton.addEventListener(
+      "pointerup",
+      stopMovingLeft
+    );
+
+    leftButton.addEventListener(
+      "pointercancel",
+      stopMovingLeft
+    );
+
+    leftButton.addEventListener(
+      "pointerleave",
+      stopMovingLeft
+    );
+
+
+    rightButton.addEventListener(
+      "pointerdown",
+      startMovingRight
+    );
+
+    rightButton.addEventListener(
+      "pointerup",
+      stopMovingRight
+    );
+
+    rightButton.addEventListener(
+      "pointercancel",
+      stopMovingRight
+    );
+
+    rightButton.addEventListener(
+      "pointerleave",
+      stopMovingRight
+    );
+
+
+    // =========================
+    // 落とすボタン
+    // =========================
+
+    const dropButton =
+      document.getElementById("dropButton");
+
+
+    dropButton.addEventListener("pointerdown", (event) => {
+
+      event.preventDefault();
+
+      if (
+        gameState === "game" &&
+        !falling &&
+        !missed
+      ) {
+        falling = true;
+      }
+    });
+
+
+    // =========================
+    // 更新
+    // =========================
+
+    function update() {
+
+
+      // -------------------------
+      // イントロ
+      // -------------------------
+
+      if (gameState === "intro") {
+
+        // 最初の待機
+        if (
+          showingPerfect &&
+          !barGoingUp &&
+          introBodyWaitTimer === 0
+        ) {
+
+          introTimer++;
+
+          if (introTimer >= introWaitTime) {
+
+            barComingDown = true;
+          }
+        }
+
+
+        // 黒い帯が下へ
+        if (
+          barComingDown &&
+          blackBarHeight < blackBarTargetHeight
+        ) {
+
+          blackBarHeight += blackBarSpeed;
+
+          if (
+            blackBarHeight >= blackBarTargetHeight
+          ) {
+
+            blackBarHeight = blackBarTargetHeight;
+
+            barComingDown = false;
+            barGoingUp = true;
+          }
+        }
+
+
+        // 帯と画像を上へ
+        if (barGoingUp) {
+
+          blackBarHeight -= blackBarSpeed * 2;
+
+          introBodyY -= introUpSpeed;
+
+
+          if (introBodyY <= -350) {
+
+            introBodyY = -350;
+
+            blackBarHeight = 0;
+
+            showingPerfect = false;
+
+            barGoingUp = false;
+
+            introBodyWaitTimer = 0;
+
+            introBodyFalling = false;
+          }
+        }
+
+
+        // 身体だけ待機
+        if (
+          !showingPerfect &&
+          !introBodyFalling &&
+          introBodyY === -350
+        ) {
+
+          introBodyWaitTimer++;
+
+          if (
+            introBodyWaitTimer >= introBodyWaitTime
+          ) {
+
+            introBodyFalling = true;
+          }
+        }
+
+
+        // 身体がゆっくり落下
+        if (introBodyFalling) {
+
+          introBodyY += introFallSpeed;
+
+          if (introBodyY >= bodyY) {
+
+            introBodyY = bodyY;
+
+            startGame();
+          }
+        }
+      }
+
+
+      // -------------------------
+      // ゲーム
+      // -------------------------
+
+      if (gameState === "game") {
+
+
+        // 左右移動
+        if (!falling && !missed) {
+
+          if (moveLeft) {
+            headX -= headSpeed;
+          }
+
+          if (moveRight) {
+            headX += headSpeed;
+          }
+        }
+
+
+        // 落下
+        if (falling && !missed) {
+
+          headY += fallSpeed;
+
+
+          // 身体の位置まで到達
+          if (headY >= targetY) {
+
+            headY = targetY;
+
+            falling = false;
+
+
+            // 成功
+            if (
+              Math.abs(headX - targetX)
+              <= successTolerance
+            ) {
+
+              resultText = "成功！";
+
+              resultDistance = getDistance();
+
+              retryButton.style.display = "block";
+
+            }
+
+            // 失敗
+            else {
+
+              missed = true;
+
+              // そのまま下まで落とす
+            }
+          }
+        }
+
+
+        // 失敗した頭を画面下まで落とす
+        if (missed) {
+
+          headY += fallSpeed;
+
+
+          if (headY > canvas.height + 200) {
+
+            resultText = "失敗!";
+
+            resultDistance = 0;
+
+            retryButton.style.display = "block";
+          }
+        }
+      }
+    }
+
+
+    // =========================
+    // 描画
+    // =========================
+
+    function draw() {
+
+      ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+
+
+      // =========================
+      // イントロ
+      // =========================
+
+      if (gameState === "intro") {
+
+
+        // 完成画像
+        if (showingPerfect) {
+
+          ctx.drawImage(
+            perfectImage,
+
+            bodyX,
+            introBodyY,
+
+            perfectImage.width * bodyScale,
+            perfectImage.height * bodyScale
+          );
+        }
+
+        // 身体だけ
+        else {
+
+          ctx.drawImage(
+            bodyImage,
+
+            bodyX,
+            introBodyY,
+
+            bodyImage.width * bodyScale,
+            bodyImage.height * bodyScale
+          );
+        }
+
+
+        // 黒い帯
+        if (blackBarHeight > 0) {
+
+          ctx.fillStyle = "black";
+
+          ctx.fillRect(
+            0,
+            0,
+            canvas.width,
+            blackBarHeight
+          );
+        }
+      }
+
+
+      // =========================
+      // ゲーム画面
+      // =========================
+
+      if (gameState === "game") {
+
+
+        // 身体
+        ctx.drawImage(
+          bodyImage,
+
+          bodyX,
+          bodyY,
+
+          bodyImage.width * bodyScale,
+          bodyImage.height * bodyScale
+        );
+
+
+        // 頭
+        ctx.drawImage(
+          headImage,
+
+          headX,
+          headY,
+
+          headImage.width * headScale,
+          headImage.height * headScale
+        );
+
+
+        // 結果
+        if (resultText !== "") {
+
+          ctx.fillStyle = "black";
+
+          ctx.textAlign = "center";
+
+          ctx.font = "48px sans-serif";
+
+          ctx.fillText(
+            resultText,
+            canvas.width / 2,
+            100
+          );
+
+
+          // 成功時だけ距離表示
+          if (resultText === "成功！") {
+
+            ctx.font = "28px sans-serif";
+
+            ctx.fillText(
+              "身体との距離：" +
+              resultDistance +
+              "cm",
+
+              canvas.width / 2,
+              145
+            );
+          }
+        }
+      }
+    }
+
+
+    // =========================
+    // メインループ
+    // =========================
+
+    function gameLoop() {
+
+      update();
+
+      draw();
+
+      requestAnimationFrame(gameLoop);
+    }
+
+
+    // =========================
+    // 画像読み込み後スタート
+    // =========================
+
+    let loadedImages = 0;
+
+    function imageLoaded() {
+
+      loadedImages++;
+
+      if (loadedImages === 3) {
+
+        gameLoop();
+      }
+    }
+
+
+    perfectImage.onload = imageLoaded;
+    bodyImage.onload = imageLoaded;
+    headImage.onload = imageLoaded;
+
+  </script>
+
+</body>
+</html>
